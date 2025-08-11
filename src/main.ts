@@ -4,16 +4,23 @@ import Stats from 'stats.js'
 import { GUI } from 'dat.gui'
 import { buildInlineFourEA888 } from './engine'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
 appRoot.innerHTML = ''
 
+const container = document.createElement('div')
+container.style.position = 'relative'
+container.style.width = '100%'
+container.style.height = '100vh'
+appRoot.appendChild(container)
+
 const canvas = document.createElement('canvas')
 canvas.id = 'ea888-canvas'
 canvas.style.width = '100%'
-canvas.style.height = '100vh'
+canvas.style.height = '100%'
 canvas.style.display = 'block'
-appRoot.appendChild(canvas)
+container.appendChild(canvas)
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' })
 renderer.setClearColor(0x0b0f1a, 1)
@@ -23,6 +30,13 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.0
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
+
+const labelRenderer = new CSS2DRenderer()
+labelRenderer.setSize(container.clientWidth, container.clientHeight)
+labelRenderer.domElement.style.position = 'absolute'
+labelRenderer.domElement.style.top = '0'
+labelRenderer.domElement.style.pointerEvents = 'none'
+container.appendChild(labelRenderer.domElement)
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x0b0f1a)
@@ -88,6 +102,8 @@ const gui = new GUI()
 const renderConfig = {
   exposure: 1.0,
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+  exploded: 0.0,
+  labels: true,
 }
 
 gui.add(renderConfig, 'exposure', 0.2, 2.0, 0.01).name('Exposure').onChange((v: number) => {
@@ -99,10 +115,15 @@ gui.add(renderConfig, 'pixelRatio', 0.5, 2.0, 0.1).name('Pixel Ratio').onChange(
   onResize()
 })
 
+gui.add(renderConfig, 'exploded', 0.0, 1.0, 0.01).name('Exploded')
+
+gui.add(renderConfig, 'labels').name('Labels')
+
 function onResize() {
-  const width = canvas.clientWidth
-  const height = canvas.clientHeight
+  const width = container.clientWidth
+  const height = container.clientHeight
   renderer.setSize(width, height, false)
+  labelRenderer.setSize(width, height)
   camera.aspect = width / height
   camera.updateProjectionMatrix()
 }
@@ -126,6 +147,28 @@ let lastTime = performance.now()
 const ea888Assembly = buildInlineFourEA888()
 ea888Group.add(ea888Assembly)
 
+// Labels
+const labels: CSS2DObject[] = []
+function makeLabel(text: string, target: THREE.Object3D, offset: THREE.Vector3 = new THREE.Vector3()) {
+  const el = document.createElement('div')
+  el.textContent = text
+  el.style.padding = '2px 6px'
+  el.style.background = 'rgba(15,23,42,0.7)'
+  el.style.color = '#e2e8f0'
+  el.style.font = '12px/16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+  el.style.borderRadius = '4px'
+  const obj = new CSS2DObject(el)
+  obj.position.copy(offset)
+  target.add(obj)
+  labels.push(obj)
+}
+
+makeLabel('Intake Cam', ea888Assembly.userData.intakeCam, new THREE.Vector3(0.2, 0.12, 0))
+makeLabel('Exhaust Cam', ea888Assembly.userData.exhaustCam, new THREE.Vector3(0.2, 0.12, 0))
+makeLabel('Crank Sprocket', ea888Assembly.userData.crankSprocket, new THREE.Vector3(0.15, 0.1, 0))
+makeLabel('Timing Chain', ea888Assembly.userData.chain, new THREE.Vector3(0, 0.15, 0))
+makeLabel('Head', ea888Assembly.userData.head, new THREE.Vector3(0.2, 0.05, 0))
+
 const sim = { rpm: 1500 }
 
 gui.add(sim, 'rpm', 300, 7000, 50).name('RPM')
@@ -147,9 +190,14 @@ function animate(now: number) {
   if (typeof updater === 'function') {
     updater(crankAngle)
   }
+  const setExploded = (ea888Assembly as any).__setExploded
+  if (typeof setExploded === 'function') setExploded(renderConfig.exploded)
+
+  for (const lbl of labels) lbl.element.style.display = renderConfig.labels ? 'block' : 'none'
 
   if (controls) controls.update()
   renderer.render(scene, camera)
+  labelRenderer.render(scene, camera)
 
   stats.end()
   requestAnimationFrame(animate)

@@ -67,8 +67,6 @@ export class ConnectingRod {
 
   alignBetween(worldA: THREE.Vector3, worldB: THREE.Vector3): void {
     const dir = new THREE.Vector3().subVectors(worldB, worldA)
-    // Compute mid if needed later for wrist pin visualization or bearings
-    // const mid = new THREE.Vector3().addVectors(worldA, worldB).multiplyScalar(0.5)
 
     const length = dir.length()
     this.rodMesh.scale.y = length / this.length
@@ -119,6 +117,32 @@ export class Camshaft {
     // 2:1 cam:crank ratio
     this.angleRad = crankAngleRad / 2
     this.root.rotation.y = this.angleRad
+  }
+}
+
+// Simple valve visual
+class Valve {
+  public root: THREE.Object3D
+  private baseY: number
+
+  constructor(baseY: number) {
+    this.root = new THREE.Object3D()
+    this.baseY = baseY
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xbfc5ce, metalness: 0.85, roughness: 0.3 })
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.12, 16), mat)
+    stem.castShadow = true
+    stem.position.y = -0.06
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.008, 24), mat)
+    head.position.y = -0.12
+    head.castShadow = true
+    this.root.add(stem)
+    this.root.add(head)
+    this.root.position.y = baseY
+  }
+
+  setLift(amount: number) {
+    // Positive lift moves valve downwards into the cylinder
+    this.root.position.y = this.baseY - amount
   }
 }
 
@@ -303,6 +327,32 @@ export function buildInlineFourEA888(): THREE.Group {
   const chainMesh = buildChainMesh(chainPoints)
   timingGroup.add(chainMesh)
 
+  // Valve bank visuals (one intake and one exhaust per cylinder)
+  const valveGroup = new THREE.Group()
+  assembly.add(valveGroup)
+  const intakeValves: Valve[] = []
+  const exhaustValves: Valve[] = []
+  for (let i = 0; i < 4; i++) {
+    const z = bores[i]
+    const intakeValve = new Valve(deckHeight + 0.08)
+    intakeValve.root.position.set(-0.05, 0, z - 0.11)
+    const exhaustValve = new Valve(deckHeight + 0.08)
+    exhaustValve.root.position.set(-0.05, 0, z + 0.11)
+    valveGroup.add(intakeValve.root)
+    valveGroup.add(exhaustValve.root)
+    intakeValves.push(intakeValve)
+    exhaustValves.push(exhaustValve)
+  }
+
+  function lobeLift(phi: number, center: number, duration: number, maxLift: number): number {
+    // Normalize to [-PI, PI]
+    let d = phi - center
+    d = Math.atan2(Math.sin(d), Math.cos(d))
+    if (Math.abs(d) > duration / 2) return 0
+    const t = (Math.cos((d / (duration / 2)) * Math.PI) + 1) / 2
+    return maxLift * t
+  }
+
   // Drive loop hook on the group
   ;(assembly as any).__update = (angle: number) => {
     for (const cyl of cylinders) cyl.update(angle)
@@ -313,6 +363,19 @@ export function buildInlineFourEA888(): THREE.Group {
     exhaustSprocket.setAngle(camAngle)
     intakeCam.setCrankAngle(angle)
     exhaustCam.setCrankAngle(angle)
+
+    // Valve motion: derive each cylinder's cam phase
+    const duration = (120 * Math.PI) / 180 // 120° cam duration
+    const liftMax = 0.015
+    for (let i = 0; i < 4; i++) {
+      const phi = camAngle + phase[i] / 2
+      // Intake centered around +60° cam
+      const li = lobeLift(phi, (60 * Math.PI) / 180, duration, liftMax)
+      // Exhaust centered around -60° cam
+      const le = lobeLift(phi, (-60 * Math.PI) / 180, duration, liftMax)
+      intakeValves[i].setLift(li)
+      exhaustValves[i].setLift(le)
+    }
   }
 
   // Visuals: simple head plane
@@ -324,6 +387,26 @@ export function buildInlineFourEA888(): THREE.Group {
   head.castShadow = true
   head.receiveShadow = true
   assembly.add(head)
+
+  // Exploded view controller
+  ;(assembly as any).__setExploded = (t: number) => {
+    const k = THREE.MathUtils.clamp(t, 0, 1)
+    head.position.y = deckHeight + k * 0.15
+    intakeCam.root.position.z = (bores[0] - 0.15) - k * 0.12
+    exhaustCam.root.position.z = (bores[3] + 0.15) + k * 0.12
+    timingGroup.position.x = -k * 0.15
+    valveGroup.position.y = k * 0.05
+  }
+
+  // Expose references for labels
+  assembly.userData = {
+    intakeCam: intakeCam.root,
+    exhaustCam: exhaustCam.root,
+    crankSprocket: crankSprocket.root,
+    chain: chainMesh,
+    head,
+    cylinders,
+  }
 
   return assembly
 }
