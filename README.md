@@ -50,3 +50,21 @@ Open http://localhost:5173.
 - Materials and textures for metals and plastics
 - Exploded view and labeling
 - Camera paths and cinematic shots
+
+## Deploy to a public webpage (GitHub Pages)
+1. Create a new GitHub repository and push this project:
+   ```bash
+   cd ea888-visual-simulator
+   git remote add origin https://github.com/<your-username>/ea888-visual-simulator.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. Ensure GitHub Pages is enabled:
+   - In your repo settings → Pages → Build and deployment → Source: GitHub Actions.
+3. On push to `main`, the included workflow builds and deploys to Pages.
+4. Your app will be available at:
+   - `https://<your-username>.github.io/ea888-visual-simulator/`
+
+Notes:
+- The workflow sets the correct base path automatically using the repository name.
+- If you use a custom domain, add a `public/CNAME` file with your domain.
