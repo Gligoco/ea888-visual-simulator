@@ -122,6 +122,61 @@ export class Camshaft {
   }
 }
 
+// Simple sprocket/belt visuals to echo EA888 timing layout
+class Sprocket {
+  public root: THREE.Object3D
+  public radius: number
+  private wheel: THREE.Mesh
+
+  constructor(radius: number, thickness: number, color: number = 0xb0b7c3) {
+    this.radius = radius
+    this.root = new THREE.Object3D()
+
+    const geom = new THREE.CylinderGeometry(radius, radius, thickness, 48, 1, true)
+    const mat = new THREE.MeshPhysicalMaterial({ color, metalness: 0.9, roughness: 0.3 })
+    this.wheel = new THREE.Mesh(geom, mat)
+    this.wheel.rotation.z = Math.PI / 2
+    this.wheel.castShadow = true
+    this.wheel.receiveShadow = true
+
+    // Accent ring for teeth hint
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.04, thickness * 0.12, 12, 64), mat)
+    rim.rotation.y = Math.PI / 2
+    rim.castShadow = true
+    this.root.add(this.wheel)
+    this.root.add(rim)
+  }
+
+  setAngle(theta: number) {
+    this.root.rotation.y = theta
+  }
+}
+
+class TimingChainPath extends THREE.Curve<THREE.Vector3> {
+  private points: THREE.Vector3[]
+  constructor(points: THREE.Vector3[]) {
+    super()
+    this.points = points
+  }
+  getPoint(t: number, _optionalTarget: THREE.Vector3 = new THREE.Vector3()): THREE.Vector3 {
+    const p = (this.points.length - 1) * t
+    const i = Math.floor(p)
+    const f = p - i
+    if (i >= this.points.length - 1) return this.points[this.points.length - 1].clone()
+    return new THREE.Vector3().lerpVectors(this.points[i], this.points[i + 1], f)
+  }
+}
+
+function buildChainMesh(pathPoints: THREE.Vector3[]): THREE.Mesh {
+  const curve = new TimingChainPath(pathPoints)
+  const tube = new THREE.TubeGeometry(curve, 120, 0.015, 8, true)
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0x9aa0a6, metalness: 1.0, roughness: 0.25 })
+  const mesh = new THREE.Mesh(tube, mat)
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  return mesh
+}
+
 export interface CylinderKinematicsConfig {
   crankThrowRadius: number
   rodLength: number
@@ -204,9 +259,60 @@ export function buildInlineFourEA888(): THREE.Group {
     cylinders.push(cyl)
   }
 
+  // Timing components (visual)
+  const timingGroup = new THREE.Group()
+  assembly.add(timingGroup)
+
+  // Crank sprocket location (front-left lower as in illustration)
+  const crankSprocket = new Sprocket(0.08, 0.04)
+  crankSprocket.root.position.set(-0.55, 0.05, bores[0] - 0.18)
+  timingGroup.add(crankSprocket.root)
+
+  // Dual cams up at head plane
+  const camY = deckHeight + 0.12
+  const intakeCam = new Camshaft()
+  intakeCam.root.position.set(-0.25, camY, bores[0] - 0.15)
+  const exhaustCam = new Camshaft()
+  exhaustCam.root.position.set(-0.25, camY, bores[3] + 0.15)
+  timingGroup.add(intakeCam.root)
+  timingGroup.add(exhaustCam.root)
+
+  // Cam sprockets at the left ends of cams
+  const camRadius = 0.12
+  const intakeSprocket = new Sprocket(camRadius, 0.05)
+  intakeSprocket.root.position.copy(intakeCam.root.position).add(new THREE.Vector3(-0.45, 0, 0))
+  const exhaustSprocket = new Sprocket(camRadius, 0.05)
+  exhaustSprocket.root.position.copy(exhaustCam.root.position).add(new THREE.Vector3(-0.45, 0, 0))
+  timingGroup.add(intakeSprocket.root)
+  timingGroup.add(exhaustSprocket.root)
+
+  // Chain path: approximate rectangle with rounded corners following sprockets
+  const pA = crankSprocket.root.position.clone()
+  const pB = intakeSprocket.root.position.clone()
+  const pC = exhaustSprocket.root.position.clone()
+
+  const chainPoints: THREE.Vector3[] = []
+  // Up from crank to intake sprocket
+  chainPoints.push(pA.clone().add(new THREE.Vector3(0.1, 0, 0)))
+  chainPoints.push(new THREE.Vector3(pA.x + 0.1, camY - 0.03, pB.z))
+  // Across to exhaust sprocket
+  chainPoints.push(new THREE.Vector3(pC.x + 0.02, camY - 0.03, pC.z))
+  // Down near crank and close loop
+  chainPoints.push(new THREE.Vector3(pA.x + 0.1, 0.03, pA.z))
+
+  const chainMesh = buildChainMesh(chainPoints)
+  timingGroup.add(chainMesh)
+
   // Drive loop hook on the group
   ;(assembly as any).__update = (angle: number) => {
     for (const cyl of cylinders) cyl.update(angle)
+    // Spin sprockets to sell the motion; cams at half crank speed
+    crankSprocket.setAngle(angle)
+    const camAngle = angle / 2
+    intakeSprocket.setAngle(camAngle)
+    exhaustSprocket.setAngle(camAngle)
+    intakeCam.setCrankAngle(angle)
+    exhaustCam.setCrankAngle(angle)
   }
 
   // Visuals: simple head plane

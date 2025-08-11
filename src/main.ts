@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import Stats from 'stats.js'
 import { GUI } from 'dat.gui'
 import { buildInlineFourEA888 } from './engine'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
 appRoot.innerHTML = ''
@@ -26,12 +27,16 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x0b0f1a)
 
+// Physically-based environment for metal reflections
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 2000)
 scene.add(camera)
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x202020, 0.8)
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x202020, 0.7)
 scene.add(hemiLight)
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2)
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.4)
 dirLight.position.set(5, 10, 7)
 dirLight.castShadow = true
 scene.add(dirLight)
